@@ -236,6 +236,7 @@ class GMM(BaseEstimator):
         self.n_init = n_init
         self.params = params
         self.init_params = init_params
+        self.X_weights = None
 
         if not covariance_type in ['spherical', 'tied', 'diag', 'full']:
             raise ValueError('Invalid value for covariance_type: %s' %
@@ -245,6 +246,7 @@ class GMM(BaseEstimator):
             raise ValueError('GMM estimation requires at least one run')
 
         self.weights_ = np.ones(self.n_components) / self.n_components
+
 
         # flag to indicate exit status of fit() method: converged (True) or
         # n_iter reached (False)
@@ -302,6 +304,7 @@ class GMM(BaseEstimator):
             observation
         """
         X = np.asarray(X)
+
         if X.ndim == 1:
             X = X[:, np.newaxis]
         if X.size == 0:
@@ -309,11 +312,17 @@ class GMM(BaseEstimator):
         if X.shape[1] != self.means_.shape[1]:
             raise ValueError('The shape of X  is not compatible with self')
 
+        if self.X_weights is None:
+            X_weights = np.ones(X.shape[0])
+            X_weights = X_weights[:, np.newaxis]
+            self.X_weights = np.tile(X_weights, self.n_components)
+
         lpr = (log_multivariate_normal_density(X, self.means_, self.covars_,
                                                self.covariance_type)
                + np.log(self.weights_))
+
         logprob = logsumexp(lpr, axis=1)
-        responsibilities = np.exp(lpr - logprob[:, np.newaxis])
+        responsibilities = np.exp(lpr - logprob[:, np.newaxis] + np.log(self.X_weights))
         return logprob, responsibilities
 
     def score(self, X):
@@ -404,7 +413,7 @@ class GMM(BaseEstimator):
                     num_comp_in_X, random_state=random_state).T
         return X
 
-    def fit(self, X):
+    def fit(self, X, X_weights=None):
         """Estimate model parameters with the expectation-maximization
         algorithm.
 
@@ -419,15 +428,34 @@ class GMM(BaseEstimator):
         X : array_like, shape (n, n_features)
             List of n_features-dimensional data points.  Each row
             corresponds to a single data point.
+
+        X_weights : array_like, shape (n, n_features)
+            List of n_feature-dimensional weights for data points. Each row
+            corresponds to the weight of a single data point.
         """
         ## initialization step
         X = np.asarray(X, dtype=np.float)
+
         if X.ndim == 1:
             X = X[:, np.newaxis]
         if X.shape[0] < self.n_components:
             raise ValueError(
                 'GMM estimation with %s components, but got only %s samples' %
                 (self.n_components, X.shape[0]))
+
+        if X_weights is not None:
+            X_weights = np.asarray(X_weights, dtype=np.float)
+            if X_weights.ndim == 1:
+               X_weights = X_weights[:, np.newaxis]
+            if X_weights.shape[0] < self.n_components:
+                raise ValueError(
+                    'GMM estimation with %s components, but got only %s samples for X_weights' %
+                    (self.n_components, X_weights.shape[0]))
+            self.X_weights = X_weights
+        else:
+            X_weights = np.ones(X.shape[0])
+            X_weights = X_weights[:, np.newaxis]
+            self.X_weights = X_weights
 
         max_log_prob = -np.infty
 
@@ -440,6 +468,7 @@ class GMM(BaseEstimator):
             if 'w' in self.init_params or not hasattr(self, 'weights_'):
                 self.weights_ = np.tile(1.0 / self.n_components,
                                         self.n_components)
+
 
             if 'c' in self.init_params or not hasattr(self, 'covars_'):
                 cv = np.cov(X.T) + self.min_covar * np.eye(X.shape[1])
@@ -495,9 +524,9 @@ class GMM(BaseEstimator):
         weights = responsibilities.sum(axis=0)
         weighted_X_sum = np.dot(responsibilities.T, X)
         inverse_weights = 1.0 / (weights[:, np.newaxis] + 10 * EPS)
-
         if 'w' in params:
             self.weights_ = (weights / (weights.sum() + 10 * EPS) + EPS)
+
         if 'm' in params:
             self.means_ = weighted_X_sum * inverse_weights
         if 'c' in params:
@@ -559,10 +588,12 @@ class GMM(BaseEstimator):
 def _log_multivariate_normal_density_diag(X, means, covars):
     """Compute Gaussian log-density at X for a diagonal model"""
     n_samples, n_dim = X.shape
+
     lpr = -0.5 * (n_dim * np.log(2 * np.pi) + np.sum(np.log(covars), 1)
                   + np.sum((means ** 2) / covars, 1)
                   - 2 * np.dot(X, (means / covars).T)
                   + np.dot(X ** 2, (1.0 / covars).T))
+
     return lpr
 
 

@@ -264,6 +264,69 @@ class GMMTester():
         else:
             self.assertTrue(np.sum(np.abs(trainll / 100)) < 2)
 
+    def test_train_weights(self):
+        def gaussian(x, mu, sig):
+            return (1. / (np.sqrt(2. * np.pi) * sig)) * np.exp(-np.power(x - mu, 2.) / (2 * np.power(sig, 2.)))
+
+        def gaussian_double(x, weight1, mu1, sig1, weight2, mu2, sig2):
+            return (1. / (np.sqrt(2. * np.pi) * np.sqrt(np.power(sig1, 2.) + np.power(sig2, 2.))) * (
+            weight1 * np.exp(-np.power(x - mu1, 2.) / (2 * np.power(sig1, 2.))) + weight2 * np.exp(
+                -np.power(x - mu2, 2.) / (2 * np.power(sig2, 2.)))))
+
+        def weights_s(x, mu, sig, weight1, mu1, sig1, weight2, mu2, sig2):
+            return gaussian_double(x, weight1, mu1, sig1, weight2, mu2, sig2) / gaussian(x, mu, sig)
+
+        mu = 1150.
+        sig = 450.
+        sample = 10000
+
+        mu1, sig1, weight1 = 900.0, 100.0, 0.2
+        mu2, sig2, weight2 = 1500.0, 200.0, 0.8
+
+        X = np.random.normal(mu, sig, sample)
+        X_weights = weights_s(X, mu=mu, sig=sig, mu1=mu1, sig1=sig1, weight1=weight1, mu2=mu2, sig2=sig2, weight2=weight2)
+
+        g = self.model(n_components=2, covariance_type='diag',
+                       min_covar=0.0000205, n_iter=100,
+                       init_params='wmc', params='wmc', thresh=0.000000000001)
+        init_means_ = np.array([[900.], [1500.]])
+        init_covars_ = np.array([[10000.], [40000.]])
+        init_weights_ = np.array([[0.2], [0.8]])
+        if init_weights_.ndim == 1:
+           init_weights_ = init_weights_[:, np.newaxis]
+
+        initialise = False
+        if initialise:
+            g.means_ = init_means_
+            g.covars_ = init_covars_
+            g.weights_ = init_weights_[:, 0]
+
+        g.fit(X=X, X_weights=X_weights)
+
+        # Check means
+        self.assertTrue(
+            abs(min(g.means_)[0] - mu1) < 10
+        )
+        self.assertTrue(
+            abs(max(g.means_)[0] - mu2) < 10
+        )
+
+        # Check sigmas
+        self.assertTrue(
+            abs(np.sqrt(min(g.covars_)[0]) - sig1) < 10
+        )
+        self.assertTrue(
+            abs(np.sqrt(max(g.covars_)[0]) - sig2) < 10
+        )
+
+        # Check weights
+        self.assertTrue(
+            abs(min(g.weights_) - weight1) < 0.1
+        )
+        self.assertTrue(
+            abs(max(g.weights_) - weight2) < 0.1
+        )
+
     def score(self, g, X):
         return g.score(X).sum()
 
